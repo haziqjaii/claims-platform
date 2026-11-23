@@ -1,0 +1,163 @@
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="brand">Claims Workspace</span>
+    @if (account(); as current) {
+      <div class="account">
+        <div><strong>{{ current.name }}</strong><small>{{ current.role === 'officer' ? 'Claims officer' : 'Claimant' }}</small></div>
+        <button type="button" class="secondary" [disabled]="busy()" (click)="signOut()">Sign out</button>
+      </div>
+    }
+  </div>
+</header>
+
+<main [class.sign-in-layout]="!account()">
+  @if (error()) { <p class="alert error" role="alert">{{ error() }}</p> }
+  @if (notice()) { <p class="alert success" role="status">{{ notice() }}</p> }
+
+  @if (account(); as current) {
+    <section class="page-heading">
+      <h1>{{ current.role === 'officer' ? 'Claims queue' : 'My claims' }}</h1>
+      <div class="actions">
+        <button type="button" class="secondary" [disabled]="busy()" (click)="refresh()">Refresh</button>
+        @if (current.role === 'claimant') {
+          <button type="button" [disabled]="busy()" (click)="startClaim()">Report an incident</button>
+        }
+      </div>
+    </section>
+
+    @if (workload(); as summary) {
+      <section class="metrics" aria-label="Team workload">
+        <div class="tile"><span>New claims</span><strong>{{ summary.submitted }}</strong></div>
+        <div class="tile"><span>In review</span><strong>{{ summary.inReview }}</strong></div>
+        <div class="tile"><span>Awaiting information</span><strong>{{ summary.informationRequested }}</strong></div>
+        <div class="tile"><span>Decisions recorded</span><strong>{{ summary.settled + summary.rejected }}</strong></div>
+        <div class="tile money"><span>Open claims · reported loss</span><strong>{{ summary.outstandingReportedLossMinor / 100 | currency:summary.currency:'code' }}</strong></div>
+      </section>
+    }
+
+    <div class="columns">
+      <section class="panel claim-list" aria-labelledby="claim-list-label">
+        <div class="panel-heading">
+          <h2 id="claim-list-label">Claims <span class="count">{{ visibleClaims().length }}</span></h2>
+          <label class="filter">Filter
+            <select [ngModel]="filter()" (ngModelChange)="filter.set($event)">
+              <option value="all">All claims</option>
+              @if (current.role === 'officer') { <option value="mine">Assigned to me</option> }
+              @for (status of statuses; track status) { <option [value]="status">{{ labels[status] }}</option> }
+            </select>
+          </label>
+        </div>
+        @for (item of visibleClaims(); track item.id) {
+          <button type="button" class="claim-row" [class.selected]="!creating() && detail()?.claim?.id === item.id"
+            [attr.aria-pressed]="!creating() && detail()?.claim?.id === item.id" [disabled]="busy()" (click)="openClaim(item.id)">
+            <span class="row-main"><strong>{{ reference(item.id) }}</strong><span class="badge" [attr.data-status]="item.status">{{ labels[item.status] }}</span></span>
+            <span class="row-meta"><span class="category">{{ item.category }} claim</span><span>{{ item.updatedAt | date:'d MMM, HH:mm':'+0800' }}</span></span>
+          </button>
+        } @empty {
+          <p class="empty">{{ filter() === 'all' ? 'There are no claims yet.' : 'No claims match this filter.' }}</p>
+        }
+      </section>
+
+      <section class="panel claim-detail" aria-label="Claim details">
+        @if (creating()) {
+          <h2>Report an incident</h2>
+          <form (ngSubmit)="submitClaim()" #claimForm="ngForm">
+            <div class="field-row">
+              <label>Claim type
+                <select name="category" [(ngModel)]="draft.category">
+                  <option value="motor">Motor</option><option value="property">Property</option>
+                </select>
+              </label>
+              <label>Incident date
+                <input type="date" name="incidentDate" [(ngModel)]="draft.incidentDate" [max]="today" required>
+              </label>
+            </div>
+            <label>Reported loss (MYR)
+              <input type="number" name="reportedLoss" [(ngModel)]="draft.reportedLoss" min="0.01" max="100000000" step="0.01" required>
+            </label>
+            <label>What happened?
+              <textarea name="description" [(ngModel)]="draft.description" rows="5" maxlength="2000" required></textarea>
+            </label>
+            <div class="actions">
+              <button type="submit" [disabled]="busy() || claimForm.invalid || !draft.description.trim()">Submit claim</button>
+              <button type="button" class="secondary" [disabled]="busy()" (click)="creating.set(false)">Cancel</button>
+            </div>
+          </form>
+        } @else if (detail(); as selected) {
+          <div class="detail-heading">
+            <div><div class="category detail-category">{{ selected.claim.category }} claim</div><h2>{{ reference(selected.claim.id) }}</h2></div>
+            <span class="badge" [attr.data-status]="selected.claim.status">{{ labels[selected.claim.status] }}</span>
+          </div>
+          <dl class="facts">
+            <div><dt>Incident date</dt><dd>{{ selected.claim.incidentDate + 'T00:00:00+08:00' | date:'d MMM yyyy':'+0800' }}</dd></div>
+            <div><dt>Reported loss</dt><dd>{{ selected.claim.reportedLossMinor / 100 | currency:'MYR':'code' }}</dd></div>
+            @if (current.role === 'officer') {
+              <div><dt>Assigned officer</dt><dd>{{ !selected.claim.assigneeId ? 'Unassigned' : selected.claim.assigneeId === current.id ? 'You' : selected.claim.assigneeId }}</dd></div>
+            }
+          </dl>
+          <h3>Incident description</h3>
+          <p class="message">{{ selected.claim.description }}</p>
+
+          @if (current.role === 'officer' && selected.claim.status === 'submitted') {
+            <div class="action-panel">
+              <button type="button" [disabled]="busy()" (click)="change('assignment')">Assign to me</button>
+            </div>
+          }
+          @if (current.role === 'officer' && selected.claim.status === 'inReview' && selected.claim.assigneeId === current.id) {
+            <div class="action-panel">
+              <label>Question or decision reason
+                <textarea rows="3" [(ngModel)]="note" maxlength="1000" placeholder="This note is visible to the claimant."></textarea>
+              </label>
+              <div class="actions">
+                <button type="button" class="secondary" [disabled]="busy() || !note.trim()" (click)="change('information-request')">Request information</button>
+                <button type="button" [disabled]="busy() || !note.trim()" (click)="change('decision', 'settled')">Settle claim</button>
+                <button type="button" class="danger" [disabled]="busy() || !note.trim()" (click)="change('decision', 'rejected')">Reject claim</button>
+              </div>
+            </div>
+          }
+          @if (current.role === 'claimant' && selected.claim.status === 'informationRequested') {
+            <div class="action-panel">
+              <label>Reply to the information request
+                <textarea rows="3" [(ngModel)]="note" maxlength="1000"></textarea>
+              </label>
+              <button type="button" [disabled]="busy() || !note.trim()" (click)="change('information-response')">Send information</button>
+            </div>
+          }
+
+          <h3>Claim history</h3>
+          <ol class="history">
+            @for (entry of selected.history.slice().reverse(); track entry.version) {
+              <li>
+                <div class="history-title"><strong>{{ labels[entry.status] }}</strong><time [attr.datetime]="entry.occurredAt">{{ entry.occurredAt | date:'d MMM, HH:mm':'+0800' }}</time></div>
+                <small>{{ entry.actor === 'officer' ? 'Claims officer' : 'Claimant' }}</small>
+                @if (entry.note) { <p class="message">{{ entry.note }}</p> }
+              </li>
+            }
+          </ol>
+        } @else {
+          <div class="empty detail-empty"><h2>Claim details</h2><p>Select a claim to see its status and history.</p></div>
+        }
+      </section>
+    </div>
+  } @else {
+    <section class="panel sign-in" aria-labelledby="sign-in-title">
+      <h1 id="sign-in-title">Sign in</h1>
+      <p>Choose an account to open the local demo.</p>
+      <form (ngSubmit)="signIn()" #credentials="ngForm">
+        <label>Demo account
+          <select name="account" [(ngModel)]="accountId">
+            <option value="claimant-a">Amina Hassan · Claimant</option>
+            <option value="claimant-b">Daniel Lim · Claimant</option>
+            <option value="officer-a">Maya Tan · Claims officer</option>
+            <option value="officer-b">Amir Rahman · Claims officer</option>
+          </select>
+        </label>
+        <label>Demo password
+          <input name="password" type="password" [(ngModel)]="password" autocomplete="current-password" required>
+        </label>
+        <div class="password-hint">Use <code>claims-demo</code> for any demo account.</div>
+        <button type="submit" [disabled]="busy() || credentials.invalid">Sign in</button>
+      </form>
+    </section>
+  }
+</main>
