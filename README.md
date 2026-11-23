@@ -7,6 +7,7 @@ A local insurance claims demo. Claimants report incidents, read their claim hist
 You need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) and [Node.js 24](https://nodejs.org/). Start the API and frontend in separate terminals from the repository root.
 
 ```sh
+dotnet restore backend --locked-mode
 dotnet run --project backend
 ```
 
