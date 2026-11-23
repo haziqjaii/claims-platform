@@ -35,7 +35,9 @@ public sealed record StatusChanged(Guid EventId, Guid ClaimId, int Version, Clai
 
 public enum ClaimOperation { Assign, RequestInformation, Respond, Decide }
 
-public sealed class ClaimConflict(string message) : Exception(message);
+public sealed class ClaimConflict(string message) : Exception(message)
+{
+}
 
 public static class ClaimWorkflow
 {
@@ -45,26 +47,23 @@ public static class ClaimWorkflow
         if (claim.Version != expectedVersion)
             throw new ClaimConflict("This claim has changed. Refresh it and try again.");
 
-        return (operation, claim.Status) switch
+        var nextStatus = (operation, claim.Status) switch
         {
-            (ClaimOperation.Assign, ClaimStatus.Submitted) => claim with
-            {
-                Status = ClaimStatus.InReview, AssigneeId = actor.Id, Version = claim.Version + 1, UpdatedAt = now
-            },
-            (ClaimOperation.RequestInformation, ClaimStatus.InReview) when claim.AssigneeId == actor.Id => claim with
-            {
-                Status = ClaimStatus.InformationRequested, Version = claim.Version + 1, UpdatedAt = now
-            },
-            (ClaimOperation.Respond, ClaimStatus.InformationRequested) => claim with
-            {
-                Status = ClaimStatus.InReview, Version = claim.Version + 1, UpdatedAt = now
-            },
+            (ClaimOperation.Assign, ClaimStatus.Submitted) => ClaimStatus.InReview,
+            (ClaimOperation.RequestInformation, ClaimStatus.InReview) when claim.AssigneeId == actor.Id =>
+                ClaimStatus.InformationRequested,
+            (ClaimOperation.Respond, ClaimStatus.InformationRequested) => ClaimStatus.InReview,
             (ClaimOperation.Decide, ClaimStatus.InReview) when claim.AssigneeId == actor.Id
-                && decision is ClaimStatus.Settled or ClaimStatus.Rejected => claim with
-            {
-                Status = decision.Value, Version = claim.Version + 1, UpdatedAt = now
-            },
+                && decision is ClaimStatus.Settled or ClaimStatus.Rejected => decision.Value,
             _ => throw new ClaimConflict("That action is unavailable for this claim and account.")
+        };
+
+        return claim with
+        {
+            Status = nextStatus,
+            AssigneeId = operation == ClaimOperation.Assign ? actor.Id : claim.AssigneeId,
+            Version = claim.Version + 1,
+            UpdatedAt = now
         };
     }
 }

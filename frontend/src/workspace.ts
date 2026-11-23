@@ -183,7 +183,8 @@ export class Workspace {
         if (error.status === 401 && this.account()) this.clearSession();
         const validation = error.error?.errors as Record<string, string[]> | undefined;
         this.error.set((validation && Object.values(validation).flat().join(' ')) || error.error?.detail ||
-          (error.status === 0 ? 'The claims API is unavailable.' : 'The request failed. Try again.'));
+          (error.status === 0 || error.status >= 500 ? 'The claims API is unavailable. Check that it is running.' :
+            'The request failed. Try again.'));
       } else {
         this.error.set('The request failed. Try again.');
       }
